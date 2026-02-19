@@ -40,3 +40,36 @@
 .read-the-docs {
   color: #888;
 }
+.weather-container {
+  max-width: 400px;
+  margin: 20px auto;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: rgb(0, 0, 0);
+}
+
+.forecast-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid #eee;
+  padding: 10px;
+}
+
+.forecast-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.forecast-item:last-child {
+  border-bottom: none;
+}
+
+.forecast-item div:first-child {
+  font-weight: bold;
+  min-width: 100px;
+}
+ 
