@@ -91,56 +91,47 @@ jobs:
 
             👆 Click **APPROVE** to deploy
 
-      # 4) DEPLOY
-      - name: Deploy New App
-        shell: powershell
-        run: |
-          Import-Module WebAdministration
+     
 
-          $siteName    = "MyReactApp"
-          $deployPath  = "C:\inetpub\wwwroot\MyReactApp"
-          $appPoolName = "MyReactAppPool"
+         # 4. DEPLOY
+    - name: Deploy New App
+      shell: powershell
+      run: |
+        Import-Module WebAdministration
+        $siteName = "MyReactApp"
+        $deployPath = "C:\inetpub\wwwroot\MyReactApp"
+        $appPoolName = "MyReactAppPool"
+        $buildPath = "$PWD\dist"
 
-          $buildPath = Join-Path $PWD.Path 'dist'
-          if (-not (Test-Path $buildPath)) {
-            throw "❌ Build output not found at $buildPath"
-          }
+        Stop-WebAppPool -Name $appPoolName
+        Remove-Item "$deployPath\*" -Recurse -Force -ErrorAction SilentlyContinue
+        Copy-Item "$buildPath\*" $deployPath -Recurse -Force
 
-          # Stop pool, replace content, write SPA rewrite config
-          Stop-WebAppPool -Name $appPoolName -ErrorAction SilentlyContinue
-          if (Test-Path $deployPath) {
-            Remove-Item (Join-Path $deployPath '*') -Recurse -Force -ErrorAction SilentlyContinue
-          } else {
-            New-Item -ItemType Directory -Force -Path $deployPath | Out-Null
-          }
-          Copy-Item (Join-Path $buildPath '*') $deployPath -Recurse -Force
+        $webConfigPath = "$deployPath\web.config"
+        Remove-Item $webConfigPath -ErrorAction SilentlyContinue
 
-          $webConfigPath = Join-Path $deployPath 'web.config'
-          if (Test-Path $webConfigPath) {
-            Remove-Item $webConfigPath -Force -ErrorAction SilentlyContinue
-          }
+        $webConfig = [string]::Join("`n", @(
+          '<?xml version="1.0"?>',
+          '<configuration>',
+          '  <system.webServer>',
+          '    <rewrite>',
+          '      <rules>',
+          '        <rule name="React Routes" stopProcessing="true">',
+          '          <match url=".*" />',
+          '          <conditions logicalGrouping="MatchAll">',
+          '            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />',
+          '          </conditions>',
+          '          <action type="Rewrite" url="index.html" />',
+          '        </rule>',
+          '      </rules>',
+          '    </rewrite>',
+          '  </system.webServer>',
+          '</configuration>'
+        ))
 
-          @'
-<?xml version="1.0"?>
-<configuration>
-  <system.webServer>
-    <rewrite>
-      <rules>
-        <rule name="React Routes" stopProcessing="true">
-          <match url=".*" />
-          <conditions logicalGrouping="MatchAll">
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-          </conditions>
-          <action type="Rewrite" url="index.html" />
-        </rule>
-      </rules>
-    </rewrite>
-  </system.webServer>
-</configuration>
-'@ | Set-Content -Path $webConfigPath -Encoding UTF8
-
-          Start-WebAppPool -Name $appPoolName
-          Write-Output "✅ Deployed!"
+        Set-Content -Path $webConfigPath -Value $webConfig -Encoding UTF8
+        Start-WebAppPool -Name $appPoolName
+        Write-Output "✅ Deployed!"
 
       # 5) HEALTH CHECK
       - name: Verify Deployment
