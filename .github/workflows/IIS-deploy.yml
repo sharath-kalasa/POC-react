@@ -89,25 +89,24 @@ jobs:
         Remove-Item $deployPath\* -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item $buildPath\* $deployPath -Recurse -Force
 
-        $webConfig = @'
-<?xml version="1.0"?>
-<configuration>
-  <system.webServer>
-    <rewrite>
-      <rules>
-        <rule name="React Routes" stopProcessing="true">
-          <match url=".*" />
-          <conditions logicalGrouping="MatchAll">
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-          </conditions>
-          <action type="Rewrite" url="index.html" />
-        </rule>
-      </rules>
-    </rewrite>
-  </system.webServer>
-</configuration>
-'@
-        $webConfig | Out-File "$deployPath\web.config" -Encoding UTF8
+        $webConfigPath = "$deployPath\web.config"
+        Remove-Item $webConfigPath -ErrorAction SilentlyContinue
+        Add-Content -Path $webConfigPath -Value '<?xml version="1.0"?>'
+        Add-Content -Path $webConfigPath -Value '<configuration>'
+        Add-Content -Path $webConfigPath -Value '  <system.webServer>'
+        Add-Content -Path $webConfigPath -Value '    <rewrite>'
+        Add-Content -Path $webConfigPath -Value '      <rules>'
+        Add-Content -Path $webConfigPath -Value '        <rule name="React Routes" stopProcessing="true">'
+        Add-Content -Path $webConfigPath -Value '          <match url=".*" />'
+        Add-Content -Path $webConfigPath -Value '          <conditions logicalGrouping="MatchAll">'
+        Add-Content -Path $webConfigPath -Value '            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />'
+        Add-Content -Path $webConfigPath -Value '          </conditions>'
+        Add-Content -Path $webConfigPath -Value '          <action type="Rewrite" url="index.html" />'
+        Add-Content -Path $webConfigPath -Value '        </rule>'
+        Add-Content -Path $webConfigPath -Value '      </rules>'
+        Add-Content -Path $webConfigPath -Value '    </rewrite>'
+        Add-Content -Path $webConfigPath -Value '  </system.webServer>'
+        Add-Content -Path $webConfigPath -Value '</configuration>'
         Start-WebAppPool -Name $appPoolName
         Write-Output "✅ Deployed!"
 
