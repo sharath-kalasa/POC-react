@@ -64,7 +64,7 @@ jobs:
         npm ci
         npm run build
 
-    # 3. DEPLOY
+   # 3. DEPLOY
     - name: Deploy New App
       shell: powershell
       run: |
@@ -74,7 +74,14 @@ jobs:
         $appPoolName = "MyReactAppPool"
         $buildPath = "$PWD\dist"
 
-        Stop-WebAppPool -Name $appPoolName
+        $poolState = (Get-WebAppPoolState -Name $appPoolName).Value
+        if ($poolState -ne "Stopped") {
+          Stop-WebAppPool -Name $appPoolName
+          Write-Output "✅ App Pool stopped"
+        } else {
+          Write-Output "ℹ️ App Pool already stopped"
+        }
+
         Remove-Item "$deployPath\*" -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item "$buildPath\*" $deployPath -Recurse -Force
 
@@ -101,6 +108,7 @@ jobs:
         ))
 
         Set-Content -Path $webConfigPath -Value $webConfig -Encoding UTF8
+
         Start-WebAppPool -Name $appPoolName
         Write-Output "✅ Deployed!"
 
