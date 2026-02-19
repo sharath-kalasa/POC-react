@@ -8,7 +8,7 @@ on:
 
 jobs:
   deploy-with-approval:
-    runs-on: self-hosted
+    runs-on: [self-hosted, Windows, X64]
 
     steps:
     # 1. CHECK IIS SITE & CREATE IF MISSING + BACKUP
