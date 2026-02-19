@@ -69,11 +69,23 @@ jobs:
         node-version: '20'
         cache: 'npm'
 
-    - name: Install & Build
+    - name: Install Dependencies
       shell: cmd
+      run: npm ci
+
+    - name: Build
+      shell: cmd
+      run: npm run build
+
+    - name: Check dist folder
+      shell: powershell
       run: |
-        npm ci
-        npm run build
+        if (Test-Path "$PWD\dist") {
+          Write-Output "dist folder exists"
+          Get-ChildItem "$PWD\dist"
+        } else {
+          throw "dist folder does not exist - build failed"
+        }
 
     # 3. DEPLOY
     - name: Deploy New App
