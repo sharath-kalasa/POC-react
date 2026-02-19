@@ -2,7 +2,8 @@ name: React Vite → IIS (Auto-Create Site + Backup + Rollback)
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 # Needed for the manual approval action to create an issue
@@ -20,10 +21,14 @@ jobs:
     # Match your self-hosted runner labels exactly as registered
     runs-on: [self-hosted, windows, X64]
 
+    # Default shell for this job (we'll override to cmd just for npm build)
+    defaults:
+      run:
+        shell: pwsh
+
     steps:
       # 1) CHECK IIS SITE & CREATE IF MISSING + BACKUP
       - name: Check/Create IIS Site & Backup
-        shell: powershell
         run: |
           Import-Module WebAdministration
 
@@ -80,7 +85,7 @@ jobs:
         uses: trstringer/manual-approval@v1
         with:
           secret: ${{ secrets.GITHUB_TOKEN }}   # ✅ use the built-in token
-          approvers: sharath                   # <-- put your actual GitHub username here
+          approvers: sharath                   # <-- replace with your GitHub username if different
           minimum-approvals: 1
           issue-title: "🚀 Deploy React App to IIS"
           issue-body: |
@@ -93,7 +98,6 @@ jobs:
 
       # 4) DEPLOY
       - name: Deploy New App
-        shell: powershell
         run: |
           Import-Module WebAdministration
 
@@ -106,7 +110,7 @@ jobs:
             throw "❌ Build output not found at $buildPath"
           }
 
-          # Stop pool, replace content, write SPA rewrite config
+          # Stop pool, replace content
           Stop-WebAppPool -Name $appPoolName -ErrorAction SilentlyContinue
           if (Test-Path $deployPath) {
             Remove-Item (Join-Path $deployPath '*') -Recurse -Force -ErrorAction SilentlyContinue
@@ -115,12 +119,9 @@ jobs:
           }
           Copy-Item (Join-Path $buildPath '*') $deployPath -Recurse -Force
 
+          # Write SPA rewrite web.config (YAML-safe here-string)
           $webConfigPath = Join-Path $deployPath 'web.config'
-          if (Test-Path $webConfigPath) {
-            Remove-Item $webConfigPath -Force -ErrorAction SilentlyContinue
-          }
-
-          @'
+          $webConfig = @"
 <?xml version="1.0"?>
 <configuration>
   <system.webServer>
@@ -137,14 +138,14 @@ jobs:
     </rewrite>
   </system.webServer>
 </configuration>
-'@ | Set-Content -Path $webConfigPath -Encoding UTF8
+"@
+          Set-Content -Path $webConfigPath -Value $webConfig -Encoding UTF8
 
           Start-WebAppPool -Name $appPoolName
           Write-Output "✅ Deployed!"
 
       # 5) HEALTH CHECK
       - name: Verify Deployment
-        shell: powershell
         run: |
           $deployPath = "C:\inetpub\wwwroot\MyReactApp"
           $backupPath = "${{ env.BACKUP_PATH }}"
@@ -167,4 +168,3 @@ jobs:
           }
 
           Write-Output "✅ SUCCESS! $siteUrl is live"
-``
