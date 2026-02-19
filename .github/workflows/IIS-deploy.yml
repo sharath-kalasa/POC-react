@@ -59,23 +59,7 @@ jobs:
         npm ci
         npm run build
 
-    # 3. MANUAL APPROVAL
-    - name: Wait for Deployment Approval
-      uses: trstringer/manual-approval@v1
-      with:
-        secret: ${{ github.TOKEN }}
-        approvers: sharath
-        minimum-approvals: 1
-        issue-title: "🚀 Deploy React App to IIS"
-        issue-body: |
-          Ready to deploy React Vite app
-
-          Target: http://localhost:8080
-          Backup created automatically
-
-          👆 Click APPROVE to deploy
-
-    # 4. DEPLOY
+    # 3. DEPLOY
     - name: Deploy New App
       shell: powershell
       run: |
@@ -115,7 +99,7 @@ jobs:
         Start-WebAppPool -Name $appPoolName
         Write-Output "✅ Deployed!"
 
-    # 5. HEALTH CHECK
+    # 4. HEALTH CHECK
     - name: Verify Deployment
       shell: powershell
       run: |
