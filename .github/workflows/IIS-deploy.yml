@@ -110,28 +110,9 @@ jobs:
         Start-WebAppPool -Name $appPoolName
         Write-Output "✅ Deployed!"
 
+
     # 5. HEALTH CHECK
     - name: Verify Deployment
-      shell: powershell
-      run: |
-        $deployPath = "C:\inetpub\wwwroot\MyReactApp"
-        $backupPath = "${{ env.BACKUP_PATH }}"
-        $siteUrl = "http://localhost:8080"
-
-        Start-Sleep -Seconds 3
-
-        if (-not (Test-Path "$deployPath\index.html")) {
-          throw "index.html missing"
-        }
-
-        $response = Invoke-WebRequest -Uri $siteUrl -TimeoutSec 20 -UseBasicParsing
-
-        if ($response.StatusCode -ne 200) {
-          throw "HTTP $($response.StatusCode)"
-        }
-
-        Write-Output "SUCCESS! http://localhost:8080 is live"
-
       shell: powershell
       run: |
         $deployPath = "C:\inetpub\wwwroot\MyReactApp"
@@ -145,7 +126,7 @@ jobs:
         }
 
         $response = Invoke-WebRequest -Uri $siteUrl -TimeoutSec 20 -UseBasicParsing
-        if ($response.StatusCode -ne 200) { throw "HTTP ${$response.StatusCode}" }
+        if ($response.StatusCode -ne 200) { throw "HTTP $($response.StatusCode)" }
 
         Write-Output "✅ SUCCESS! http://localhost:8080 is live"
 
