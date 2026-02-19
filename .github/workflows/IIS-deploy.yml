@@ -21,8 +21,19 @@ jobs:
         $appPoolName = "MyReactAppPool"
         $backupPath = "C:\inetpub\wwwroot\backups\MyReactAppbackup$(Get-Date -Format 'yyyyMMddHHmmss')"
 
-        New-Item -ItemType Directory -Force -Path "C:\inetpub\wwwroot\backups" -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Force -Path $deployPath -ErrorAction SilentlyContinue
+        if (Test-Path "C:\inetpub\wwwroot\backups") {
+          Write-Output "Backups folder already exists"
+        } else {
+          New-Item -ItemType Directory -Force -Path "C:\inetpub\wwwroot\backups"
+          Write-Output "Backups folder created"
+        }
+
+        if (Test-Path $deployPath) {
+          Write-Output "MyReactApp folder already exists"
+        } else {
+          New-Item -ItemType Directory -Force -Path $deployPath
+          Write-Output "MyReactApp folder created"
+        }
 
         if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) {
           Write-Output "Site '$siteName' exists"
