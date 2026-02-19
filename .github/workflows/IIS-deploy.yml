@@ -89,7 +89,7 @@ jobs:
         Remove-Item $deployPath\* -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item $buildPath\* $deployPath -Recurse -Force
 
-        $webConfig = @"
+        $webConfig = @'
 <?xml version="1.0"?>
 <configuration>
   <system.webServer>
@@ -106,7 +106,7 @@ jobs:
     </rewrite>
   </system.webServer>
 </configuration>
-"@
+'@
         $webConfig | Out-File "$deployPath\web.config" -Encoding UTF8
         Start-WebAppPool -Name $appPoolName
         Write-Output "✅ Deployed!"
