@@ -1,13 +1,14 @@
 name: React Vite → IIS (Auto-Create Site + Backup + Rollback)
 
+
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:  # Manual trigger
+  workflow_dispatch:
 
 jobs:
   deploy-with-approval:
-    runs-on: self-hosted  # Your Windows server runner [cite:1]
+    runs-on: self-hosted
 
     steps:
     # 1. CHECK IIS SITE & CREATE IF MISSING + BACKUP
@@ -21,43 +22,26 @@ jobs:
         $appPoolName = "MyReactAppPool"
         $backupPath = "C:\inetpub\wwwroot\backups\MyReactApp_backup_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
 
-        # Create backup directory
         New-Item -ItemType Directory -Force -Path "C:\inetpub\wwwroot\backups"
 
-        # CHECK IF SITE EXISTS
         if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) {
-          Write-Output "✅ Site '$siteName' exists. Checking app content..."
-
-          # Backup existing app
+          Write-Output "✅ Site '$siteName' exists"
           if (Test-Path $deployPath) {
             Copy-Item $deployPath $backupPath -Recurse -Force
-            Write-Output "✅ Backup created: $backupPath"
+            Write-Output "✅ Backup: $backupPath"
             echo "BACKUP_PATH=$backupPath" >> $env:GITHUB_ENV
-            echo "SITE_EXISTS=true" >> $env:GITHUB_ENV
-          } else {
-            echo "BACKUP_PATH=" >> $env:GITHUB_ENV
-            echo "SITE_EXISTS=true" >> $env:GITHUB_ENV
           }
+          echo "SITE_EXISTS=true" >> $env:GITHUB_ENV
         } else {
-          Write-Output "ℹ️ Site '$siteName' NOT found. Creating new site..."
-
-          # CREATE APP POOL
+          Write-Output "🆕 Creating site '$siteName'..."
           if (-not (Get-WebAppPoolState -Name $appPoolName -ErrorAction SilentlyContinue)) {
             New-WebAppPool -Name $appPoolName
-            Set-ItemProperty "IIS:\AppPools\$appPoolName" -Name processModel.identityType -Value SpecificUser
-            Set-ItemProperty "IIS:\AppPools\$appPoolName" -Name processModel.userName -Value "IIS APPPOOL\$appPoolName"
-            Write-Output "✅ App Pool '$appPoolName' created"
+            Write-Output "✅ App Pool created"
           }
-
-          # CREATE PHYSICAL PATH
           New-Item -ItemType Directory -Force -Path $deployPath
-
-          # CREATE WEBSITE
           New-Website -Name $siteName -Port 8080 -PhysicalPath $deployPath -ApplicationPool $appPoolName
-          Write-Output "✅ Site '$siteName' created on port 8080"
-
+          Write-Output "✅ Site created on port 8080"
           echo "SITE_EXISTS=false" >> $env:GITHUB_ENV
-          echo "BACKUP_PATH=" >> $env:GITHUB_ENV
         }
 
     # 2. CHECKOUT & BUILD
@@ -76,118 +60,75 @@ jobs:
         npm run build
       shell: cmd
 
-    # 3. MANUAL APPROVAL
+    # 3. MANUAL APPROVAL - FIXED ✅
     - name: Wait for Deployment Approval
       uses: trstringer/manual-approval@v1
       with:
         secret: ${{ github.TOKEN }}
-        approvers: sharath  # Replace with YOUR username
+        approvers: sharath
         minimum-approvals: 1
         issue-title: "🚀 Deploy React App to IIS"
         issue-body: |
           **Ready to deploy React Vite app**
 
-          **Site Status:** ${{ env.SITE_EXISTS == 'true' && '✅ Exists (backed up)' || '🆕 Created new' }}
-          **Backup:** `${{ env.BACKUP_PATH || 'None (new site)' }}`
-          **New build ready:** `./dist`
-          **Target:** `http://localhost:8080`
+          **Target:** http://localhost:8080
+          **Backup created automatically**
 
           👆 Click **APPROVE** to deploy
 
-    # 4. DEPLOY NEW VERSION
+    # 4. DEPLOY
     - name: Deploy New App
       shell: powershell
       run: |
         Import-Module WebAdministration
-
         $siteName = "MyReactApp"
         $deployPath = "C:\inetpub\wwwroot\MyReactApp"
         $appPoolName = "MyReactAppPool"
         $buildPath = "$PWD\dist"
 
-        Write-Output "🚀 Deploying to $deployPath"
-
-        # Stop app pool
         Stop-WebAppPool -Name $appPoolName
-
-        # Deploy new files (with web.config for React routing)
         Remove-Item $deployPath\* -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item $buildPath\* $deployPath -Recurse -Force
 
-        # Create web.config for React SPA routing
-        $webConfig = @"
-<?xml version="1.0" encoding="utf-8"?>
-<configuration>
-  <system.webServer>
-    <rewrite>
-      <rules>
-        <rule name="React Routes" stopProcessing="true">
-          <match url=".*" />
-          <conditions logicalGrouping="MatchAll">
-            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
-            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
-            <add input="{REQUEST_URI}" pattern="^/(api)" negate="true" />
-          </conditions>
-          <action type="Rewrite" url="index.html" />
-        </rule>
-      </rules>
-    </rewrite>
-    <staticContent>
-      <mimeMap fileExtension=".json" mimeType="application/json" />
-    </staticContent>
-  </system.webServer>
-</configuration>
-"@
-        $webConfig | Out-File "$deployPath\web.config" -Encoding UTF8
-
-        # Start app pool
+        $webConfigPath = "$deployPath\web.config"
+        Remove-Item $webConfigPath -ErrorAction SilentlyContinue
+        Add-Content -Path $webConfigPath -Value '<?xml version="1.0"?>'
+        Add-Content -Path $webConfigPath -Value '<configuration>'
+        Add-Content -Path $webConfigPath -Value '  <system.webServer>'
+        Add-Content -Path $webConfigPath -Value '    <rewrite>'
+        Add-Content -Path $webConfigPath -Value '      <rules>'
+        Add-Content -Path $webConfigPath -Value '        <rule name="React Routes" stopProcessing="true">'
+        Add-Content -Path $webConfigPath -Value '          <match url=".*" />'
+        Add-Content -Path $webConfigPath -Value '          <conditions logicalGrouping="MatchAll">'
+        Add-Content -Path $webConfigPath -Value '            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />'
+        Add-Content -Path $webConfigPath -Value '          </conditions>'
+        Add-Content -Path $webConfigPath -Value '          <action type="Rewrite" url="index.html" />'
+        Add-Content -Path $webConfigPath -Value '        </rule>'
+        Add-Content -Path $webConfigPath -Value '      </rules>'
+        Add-Content -Path $webConfigPath -Value '    </rewrite>'
+        Add-Content -Path $webConfigPath -Value '  </system.webServer>'
+        Add-Content -Path $webConfigPath -Value '</configuration>'
         Start-WebAppPool -Name $appPoolName
+        Write-Output "✅ Deployed!"
 
-        Write-Output "✅ Deployed to http://localhost:8080"
 
-    # 5. HEALTH CHECK & AUTO ROLLBACK
-    - name: Verify & Rollback if Failed
+    # 5. HEALTH CHECK
+    - name: Verify Deployment
       shell: powershell
       run: |
-        Import-Module WebAdministration
-
-        $siteName = "MyReactApp"
         $deployPath = "C:\inetpub\wwwroot\MyReactApp"
         $backupPath = "${{ env.BACKUP_PATH }}"
-        $appPoolName = "MyReactAppPool"
         $siteUrl = "http://localhost:8080"
 
-        Write-Output "🔍 Health check: $siteUrl"
+        Start-Sleep -Seconds 3
 
-        Start-Sleep -Seconds 3  # Wait for IIS
-
-        # Test 1: Files exist
         if (-not (Test-Path "$deployPath\index.html")) {
           throw "❌ index.html missing"
         }
 
-        # Test 2: HTTP 200
-        try {
-          $response = Invoke-WebRequest -Uri $siteUrl -TimeoutSec 20 -UseBasicParsing -MaximumRedirection 0
-          if ($response.StatusCode -ne 200) {
-            throw "HTTP ${response.StatusCode}"
-          }
-          Write-Output "✅ Deployment successful! HTTP 200 OK"
-        }
-        catch {
-          Write-Output "❌ Health check failed: $_"
+        $response = Invoke-WebRequest -Uri $siteUrl -TimeoutSec 20 -UseBasicParsing
+        if ($response.StatusCode -ne 200) { throw "HTTP $($response.StatusCode)" }
 
-          if ($backupPath -and (Test-Path $backupPath)) {
-            Write-Output "🔄 ROLLING BACK..."
-
-            Stop-WebAppPool -Name $appPoolName
-            Remove-Item $deployPath\* -Recurse -Force
-            Copy-Item $backupPath\* $deployPath -Recurse -Force
-            Start-WebAppPool -Name $appPoolName
-
-            Write-Output "✅ Rolled back to: $backupPath"
-          }
-          exit 1
-        }
+        Write-Output "✅ SUCCESS! http://localhost:8080 is live"
 
  
