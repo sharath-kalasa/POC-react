@@ -33,10 +33,15 @@ jobs:
           echo "SITEEXISTS=true" >> $env:GITHUB_ENV
         } else {
           Write-Output "🆕 Creating site '$siteName'..."
-          if (-not (Get-WebAppPoolState -Name $appPoolName -ErrorAction SilentlyContinue)) {
+
+          $poolExists = Get-ChildItem IIS:\AppPools | Where-Object { $_.Name -eq $appPoolName }
+          if (-not $poolExists) {
             New-WebAppPool -Name $appPoolName
             Write-Output "✅ App Pool created"
+          } else {
+            Write-Output "✅ App Pool already exists"
           }
+
           New-Item -ItemType Directory -Force -Path $deployPath
           New-Website -Name $siteName -Port 8080 -PhysicalPath $deployPath -ApplicationPool $appPoolName
           Write-Output "✅ Site created on port 8080"
