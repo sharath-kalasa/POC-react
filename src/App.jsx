@@ -11,7 +11,7 @@ function App() {
     const fetchForecasts = async () => {
       try {
         setLoading(true)
-        const response = await fetch('/weatherforecast')
+        const response = await fetch('http://localhost:8081/weatherforecast')
         if (!response.ok) throw new Error('Failed to fetch forecasts')
         const data = await response.json()
         setForecasts(data)
