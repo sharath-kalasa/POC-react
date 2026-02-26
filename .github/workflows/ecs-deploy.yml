@@ -17,7 +17,7 @@ jobs:
       ECR_REPO: poc-react              # ← Your ECR repo from Step 1
       ECS_CLUSTER: poc-dev  # ← Your cluster from Step 2
       ECS_SERVICE: poc-dev-ui   # ← Your service from Step 4
-      CONTAINER_NAME: dev-ui       # ← From your task definition container name
+      CONTAINER_NAME: dev-ui      # ← From your task definition container name
 
     steps:
     - name: Checkout repository
@@ -58,7 +58,7 @@ jobs:
       id: task-def-ui
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: poc-dotnet-task  # ← Your task family name from Step 3
+        task-definition: poc-dev-ui # ← Your task family name from Step 3
         container-name: ${{ env.CONTAINER_NAME }}
         image: ${{ steps.build-ui.outputs.image }}
 
