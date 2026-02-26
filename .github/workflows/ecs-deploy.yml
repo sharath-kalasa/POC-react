@@ -1,7 +1,7 @@
 name: dev-ui-deployment
 
 on:
-  workflow_dispatch:  # Manual trigger (change to `push: branches: [main]` for auto-deploy)
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -14,10 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     
     env:
-      ECR_REPO: poc-react              # ← Your ECR repo from Step 1
-      ECS_CLUSTER: poc-dev  # ← Your cluster from Step 2
-      ECS_SERVICE: poc-dev-ui   # ← Your service from Step 4
-      CONTAINER_NAME: dev-ui      # ← From your task definition container name
+      ECR_REPO: poc-react
+      ECS_CLUSTER: poc-dev
+      ECS_SERVICE: poc-dev-ui
+      TASK_FAMILY: poc-dev-ui
+      CONTAINER_NAME: dev-ui
 
     steps:
     - name: Checkout repository
@@ -26,39 +27,38 @@ jobs:
     - name: Configure AWS Credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::254475702305:role/github-actions #${{ secrets.AWS_ROLE_ARN }}     # ← Your GitHub IAM role ARN
-        role-session-name: poc-dotnet-deploy
-        aws-region: ap-south-1 #${{ secrets.AWS_REGION }}           # ← ap-south-1
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+        role-session-name: poc-dev-deploy
+        aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Extract metadata (tags, labels, sha)
-      id: meta
-      uses: docker/metadata-action@v5
-      with:
-        images: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPO }}
-
     - name: Build and push Docker image
       id: build-ui
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}  # Use commit SHA as tag
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build from root (or change to 'cd ui' if React app in subfolder)
+        # Build React app (your Dockerfile is perfect)
         docker build -t ui:latest .
-        docker tag ui:latest $ECR_REGISTRY/$ECR_REPO:ui-$IMAGE_TAG
-        docker tag ui:latest $ECR_REGISTRY/$ECR_REPO:latest
-        docker push $ECR_REGISTRY/$ECR_REPO:ui-$IMAGE_TAG
-        docker push $ECR_REGISTRY/$ECR_REPO:latest
-        echo "image=$ECR_REGISTRY/$ECR_REPO:ui-$IMAGE_TAG" >> $GITHUB_OUTPUT
+        
+        # Tag with unique SHA (like original project: ui-$IMAGE_TAG)
+        FULL_IMAGE="$ECR_REGISTRY/${{ env.ECR_REPO }}:ui-$IMAGE_TAG"
+        docker tag ui:latest $FULL_IMAGE
+        
+        # Push ONLY unique tag (skip latest - ECR immutable)
+        docker push $FULL_IMAGE
+        
+        # Output for ECS deployment
+        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
 
     - name: Fill in the new image ID in the ECS task definition
       id: task-def-ui
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: poc-dev-ui # ← Your task family name from Step 3
+        task-definition: ${{ env.TASK_FAMILY }}
         container-name: ${{ env.CONTAINER_NAME }}
         image: ${{ steps.build-ui.outputs.image }}
 
