@@ -28,7 +28,7 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: poc-dev-deploy
+        role-session-name: poc-dev-ui-deploy
         aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login to Amazon ECR
@@ -39,26 +39,26 @@ jobs:
       id: build-ui
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Build React app (your Dockerfile is perfect)
         docker build -t ui:latest .
-        
-        # Tag with unique SHA (like original project: ui-$IMAGE_TAG)
-        FULL_IMAGE="$ECR_REGISTRY/${{ env.ECR_REPO }}:ui-$IMAGE_TAG"
-        docker tag ui:latest $FULL_IMAGE
-        
-        # Push ONLY unique tag (skip latest - ECR immutable)
-        docker push $FULL_IMAGE
-        
-        # Output for ECS deployment
+        TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
+        FULL_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPO }}:ui-$TIMESTAMP"
+        docker tag ui:latest "$FULL_IMAGE"
+        docker push "$FULL_IMAGE"
         echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+
+    - name: Download current ECS task definition
+      run: |
+        aws ecs describe-task-definition \
+          --task-definition ${{ env.TASK_FAMILY }} \
+          --query 'taskDefinition' \
+          --output json > task-definition.json
 
     - name: Fill in the new image ID in the ECS task definition
       id: task-def-ui
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: ${{ env.TASK_FAMILY }}
+        task-definition: task-definition.json
         container-name: ${{ env.CONTAINER_NAME }}
         image: ${{ steps.build-ui.outputs.image }}
 
@@ -68,4 +68,5 @@ jobs:
         task-definition: ${{ steps.task-def-ui.outputs.task-definition }}
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
+        wait-for-service-stability: false
+        force-new-deployment: true
