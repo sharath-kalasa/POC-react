@@ -1,72 +1,104 @@
-name: dev-ui-deployment
+name: Deploy React to ECS
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:        # Manual trigger button
   push:
     branches: [ main ]
 
 permissions:
-  id-token: write
+  id-token: write          # OIDC authentication
   contents: read
 
 jobs:
-  dev-ui:
+  deploy:
     runs-on: ubuntu-latest
     
+    # Use your GitHub secrets directly
     env:
-      ECR_REPO: poc-react
+      AWS_REGION: ${{ secrets.aws_region }}           # ap-south-1
+      ECR_REPOSITORY: ${{ secrets.ecr_repository }}   # poc-react-dev
       ECS_CLUSTER: poc-dev
-      ECS_SERVICE: poc-dev-ui
-      TASK_FAMILY: poc-dev-ui
-      CONTAINER_NAME: dev-ui
-
+      ECS_SERVICE: poc-react-dev
+      TASK_DEFINITION: poc-react-task
+      
     steps:
-    - name: Checkout repository
+    # 1. Checkout your React code
+    - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Configure AWS Credentials
+    # 2. Configure AWS credentials using your GitHub role
+    - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        role-session-name: poc-dev-ui-deploy
-        aws-region: ${{ secrets.AWS_REGION }}
+        role-to-assume: ${{ secrets.aws_role_arn }}    # Your GitHub Actions IAM role
+        aws-region: ${{ env.AWS_REGION }}
+        role-session-name: GitHubActions-React-Deploy
 
+    # 3. Login to ECR
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build and push Docker image
-      id: build-ui
+    # 4. Build React app + Docker + Push to ECR
+    - name: Build React and push to ECR
+      id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
       run: |
-        docker build -t ui:latest .
-        TIMESTAMP=$(date -u +%Y%m%d%H%M%S)
-        FULL_IMAGE="${ECR_REGISTRY}/${{ env.ECR_REPO }}:ui-$TIMESTAMP"
-        docker tag ui:latest "$FULL_IMAGE"
-        docker push "$FULL_IMAGE"
-        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+        # Install dependencies and build React
+        npm ci
+        npm run build
+        
+        # Create production Dockerfile (nginx serves React build)
+        cat > Dockerfile << EOF
+        FROM nginx:alpine
+        COPY build /usr/share/nginx/html
+        EXPOSE 80
+        CMD ["nginx", "-g", "daemon off;"]
+        EOF
+        
+        # Build and push Docker image
+        docker build -t \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG .
+        docker push \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG
+        
+        echo "image=\$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG" >> \$GITHUB_OUTPUT
 
-    - name: Download current ECS task definition
+    # 5. Download current task definition + update image
+    - name: Update ECS task definition
+      id: task-def
       run: |
+        # Download existing task definition
         aws ecs describe-task-definition \
-          --task-definition ${{ env.TASK_FAMILY }} \
-          --query 'taskDefinition' \
-          --output json > task-definition.json
+          --task-definition \$TASK_DEFINITION \
+          --query taskDefinition > task-def.json
+        
+        # Update container image to new ECR image
+        IMAGE_URI="\$(echo '${{ steps.build-image.outputs.image }}' | sed 's/\//\\\//g')"
+        sed -i "s|\"image\": \".*\"|\"image\": \"$IMAGE_URI\"|" task-def.json
+        
+        # Register new task definition revision
+        TASK_ARN=\$(aws ecs register-task-definition \
+          --cli-input-json file://task-def.json \
+          --query 'taskDefinition.taskDefinitionArn' --output text)
+        
+        echo "task-definition=\$TASK_ARN" >> \$GITHUB_OUTPUT
 
-    - name: Fill in the new image ID in the ECS task definition
-      id: task-def-ui
-      uses: aws-actions/amazon-ecs-render-task-definition@v1
-      with:
-        task-definition: task-definition.json
-        container-name: ${{ env.CONTAINER_NAME }}
-        image: ${{ steps.build-ui.outputs.image }}
-
-    - name: Deploy Amazon ECS task definition
+    # 6. Deploy new task definition to ECS service
+    - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
-        task-definition: ${{ steps.task-def-ui.outputs.task-definition }}
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: false
-        force-new-deployment: true
+        wait-for-service-stability: true
+
+    # 7. Show success URL (your ALB DNS)
+    - name: Show deployment URL
+      run: |
+        echo "✅ React app deployed successfully!"
+        echo "Check your ALB DNS name for the live app"
+        aws elbv2 describe-load-balancers \
+          --names poc-react-alb \
+          --query 'LoadBalancers[0].DNSName' \
+          --output text || echo "Find ALB DNS in ECS console"
