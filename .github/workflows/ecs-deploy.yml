@@ -1,4 +1,4 @@
-name: Deploy React to ECS
+name: Deploy React to ECS (JSON Method)
 
 on:
   workflow_dispatch:
@@ -27,17 +27,15 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build & Push React App
+    - name: Build React and push to ECR
+      id: build-image
       run: |
-        # Timestamp tag (ddmmyyyyhhmmss)
         IMAGE_TAG=$(date +%d%m%Y%H%M%S)
         ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
         ECR_REPO="${{ secrets.ECR_REPOSITORY }}"
         FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
         
         echo "Building: $FULL_IMAGE"
-        
-        # Build React + Docker
         npm ci && npm run build
         
         cat > Dockerfile << EOF
@@ -49,39 +47,20 @@ jobs:
         
         docker build --no-cache -t "$FULL_IMAGE" .
         docker push "$FULL_IMAGE"
-        
-        echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
+        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
 
-    - name: Deploy to ECS (SIMPLEST METHOD)
-      run: |
-        aws ecs update-service \
-          --cluster poc-dev \
-          --service poc-react-dev \
-          --force-new-deployment \
-          --region ${{ secrets.AWS_REGION }}
-        
-        echo "✅ ECS Service redeployed - pulling new image!"
-        echo "✅ New image: $FULL_IMAGE"
-        
-        # Wait for deployment
-        for i in {1..20}; do
-          STATUS=$(aws ecs describe-services \
-            --cluster poc-dev \
-            --services poc-react-dev \
-            --query 'services[0].deployments[0].status' \
-            --output text --region ${{ secrets.AWS_REGION }})
-          
-          echo "Deployment status: $STATUS ($i/20)"
-          if [ "$STATUS" = "ACTIVE" ]; then
-            echo "✅ Deployment ACTIVE!"
-            break
-          fi
-          sleep 30
-        done
+    - name: Fill task definition (REPLACE dev-ui image)
+      id: task-def
+      uses: aws-actions/amazon-ecs-render-task-definition@v1
+      with:
+        task-definition: poc-react-task.json          # ✅ Your JSON file
+        container-name: dev-ui                        # ✅ Your container name
+        image: ${{ steps.build-image.outputs.image }}
 
-    - name: Final Status
-      run: |
-        echo "🎉 REACT APP LIVE!"
-        echo "Image: $FULL_IMAGE"
-        echo "Service: poc-react-dev in poc-dev cluster"
-        echo "Check ALB DNS → React app ready! 🚀"
+    - name: Deploy to ECS service
+      uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+      with:
+        task-definition: ${{ steps.task-def.outputs.task-definition }}  # ✅ Rendered JSON
+        service: poc-react-dev
+        cluster: poc-dev
+        wait-for-service-stability: true
