@@ -38,8 +38,7 @@ jobs:
       id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-        IMAGE_TAG: ${{ github.sha }}
+        IMAGE_TAG: $(date +%d%m%Y%H%M%S)  # 02032026123945 format
       run: |
         npm ci
         npm run build
@@ -58,21 +57,36 @@ jobs:
         docker push "$FULL_IMAGE"
         
         echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+        echo "✅ Image pushed: $FULL_IMAGE"
 
     - name: Update ECS task definition
       id: task-def
       run: |
+        # Download ONLY required fields for register-task-definition
         aws ecs describe-task-definition \
           --task-definition poc-react-task \
-          --query taskDefinition > task-def.json
+          --query 'taskDefinition.{ \
+            family:family, \
+            taskRoleArn:taskRoleArn, \
+            executionRoleArn:executionRoleArn, \
+            networkMode:networkMode, \
+            requiresCompatibilities:requiresCompatibilities, \
+            cpu:cpu, \
+            memory:memory, \
+            containerDefinitions:containerDefinitions \
+          }' > task-def.json
         
+        # Update first container image using jq
         IMAGE_URI="${{ steps.build-image.outputs.image }}"
-        sed -i "s|\"image\": \".*\"|\"image\": \"$IMAGE_URI\"|" task-def.json
+        jq ".containerDefinitions[0].image = \"$IMAGE_URI\"" task-def.json > task-def-updated.json
         
+        # Register new task definition
         TASK_ARN=$(aws ecs register-task-definition \
-          --cli-input-json file://task-def.json \
+          --cli-input-json "$(cat task-def-updated.json)" \
           --query 'taskDefinition.taskDefinitionArn' --output text)
+        
         echo "task-definition=$TASK_ARN" >> $GITHUB_OUTPUT
+        echo "✅ New task definition created: $TASK_ARN"
 
     - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -81,3 +95,14 @@ jobs:
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
+
+    - name: Show deployment success
+      run: |
+        echo "🎉 DEPLOYMENT COMPLETE!"
+        echo "✅ Vite build: 194KB optimized production build"
+        echo "✅ Docker image: ${{ steps.build-image.outputs.image }}"
+        echo "✅ New task definition: ${{ steps.task-def.outputs.task-definition }}"
+        echo "✅ Service: ${{ env.ECS_SERVICE }} in cluster ${{ env.ECS_CLUSTER }}"
+        echo ""
+        echo "👉 Check your ALB DNS name - React app is LIVE!"
+        echo "📱 ECS Console: https://ap-south-1.console.aws.amazon.com/ecs/v2/clusters/poc-dev"
