@@ -2,7 +2,7 @@ name: React Vite to IIS (Auto-Create Site + Backup + Rollback)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ none ]
   workflow_dispatch:
 
 jobs:
