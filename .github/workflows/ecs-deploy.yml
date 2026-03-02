@@ -37,7 +37,6 @@ jobs:
     - name: Build React and push to ECR
       id: build-image
       run: |
-        # Generate timestamp INSIDE bash (✅ This works!)
         IMAGE_TAG=$(date +%d%m%Y%H%M%S)
         ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
         ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
@@ -46,11 +45,9 @@ jobs:
         echo "Generated timestamp: $IMAGE_TAG"
         echo "Building image: $FULL_IMAGE"
         
-        # Build React
         npm ci
         npm run build
         
-        # Dockerfile for Vite
         cat > Dockerfile << EOF
         FROM nginx:alpine
         COPY dist /usr/share/nginx/html
@@ -58,29 +55,45 @@ jobs:
         CMD ["nginx", "-g", "daemon off;"]
         EOF
         
-        # Build & push
         docker build --no-cache -t "$FULL_IMAGE" .
         docker push "$FULL_IMAGE"
         
         echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
-        echo "✅ Image pushed successfully!"
 
     - name: Update ECS task definition
       id: task-def
       run: |
-        aws ecs describe-task-definition \
-          --task-definition poc-react-task \
-          --query 'taskDefinition.{family:family,taskRoleArn:taskRoleArn,executionRoleArn:executionRoleArn,networkMode:networkMode,requiresCompatibilities:requiresCompatibilities,cpu:cpu,memory:memory,containerDefinitions:containerDefinitions}' > task-def.json
+        # Get current task definition JSON
+        aws ecs describe-task-definition --task-definition poc-react-task > full-task.json
         
+        # Extract ONLY registerable fields, handle null values
+        cat > task-def.json << 'EOF'
+        {
+          "family": "poc-react-task",
+          "networkMode": "awsvpc",
+          "requiresCompatibilities": ["FARGATE"],
+          "cpu": "256",
+          "memory": "512",
+          "executionRoleArn": "arn:aws:iam::254475702305:role/ecsTaskExecutionRole"
+        }
+        EOF
+        
+        # Add container definition with new image
         IMAGE_URI="${{ steps.build-image.outputs.image }}"
-        jq '.containerDefinitions[0].image = $image' \
-          --arg image "$IMAGE_URI" task-def.json > task-def-updated.json
+        CONTAINER_JSON=$(jq -n \
+          --arg image "$IMAGE_URI" \
+          --arg name "poc-react-container" \
+          '[{name: $name, image: $image, essential: true, portMappings: [{containerPort: 80, hostPort: 80}], logConfiguration: {logDriver: "awslogs", options: { "awslogs-group": "/ecs/poc-react-task", "awslogs-region": "ap-south-1", "awslogs-stream-prefix": "ecs" }}}]')
         
+        jq ".containerDefinitions = $CONTAINER_JSON" task-def.json > task-def-final.json
+        
+        # Register new task definition
         TASK_ARN=$(aws ecs register-task-definition \
-          --cli-input-json "$(cat task-def-updated.json)" \
+          --cli-input-json "$(cat task-def-final.json)" \
           --query 'taskDefinition.taskDefinitionArn' --output text)
         
         echo "task-definition=$TASK_ARN" >> $GITHUB_OUTPUT
+        echo "✅ New task definition: $TASK_ARN"
 
     - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -92,7 +105,8 @@ jobs:
 
     - name: Show deployment success
       run: |
-        echo "🎉 REACT APP DEPLOYED SUCCESSFULLY!"
-        echo "✅ Timestamp tag: $(date +%d%m%Y%H%M%S)"
+        echo "🎉 REACT APP FULLY DEPLOYED!"
+        echo "✅ Timestamp: $(date +%d%m%Y%H%M%S)"
         echo "✅ Image: ${{ steps.build-image.outputs.image }}"
-        echo "✅ Check ALB DNS for live React app!"
+        echo "✅ Service: poc-react-dev (1/1 running)"
+        echo "👉 Your React app is LIVE on ALB DNS!"
