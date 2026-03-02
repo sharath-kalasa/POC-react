@@ -42,8 +42,8 @@ jobs:
         ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
         FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
         
-        echo "Generated timestamp: $IMAGE_TAG"
-        echo "Building image: $FULL_IMAGE"
+        echo "Timestamp: $IMAGE_TAG"
+        echo "Building: $FULL_IMAGE"
         
         npm ci
         npm run build
@@ -57,56 +57,38 @@ jobs:
         
         docker build --no-cache -t "$FULL_IMAGE" .
         docker push "$FULL_IMAGE"
-        
         echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
 
     - name: Update ECS task definition
       id: task-def
       run: |
-        # Get current task definition JSON
-        aws ecs describe-task-definition --task-definition poc-react-task > full-task.json
+        # Download current task def and update image only
+        aws ecs describe-task-definition --task-definition poc-react-task --query taskDefinition > full-task.json
         
-        # Extract ONLY registerable fields, handle null values
-        cat > task-def.json << 'EOF'
-        {
-          "family": "poc-react-task",
-          "networkMode": "awsvpc",
-          "requiresCompatibilities": ["FARGATE"],
-          "cpu": "256",
-          "memory": "512",
-          "executionRoleArn": "arn:aws:iam::254475702305:role/ecsTaskExecutionRole"
-        }
-        EOF
-        
-        # Add container definition with new image
         IMAGE_URI="${{ steps.build-image.outputs.image }}"
-        CONTAINER_JSON=$(jq -n \
-          --arg image "$IMAGE_URI" \
-          --arg name "poc-react-container" \
-          '[{name: $name, image: $image, essential: true, portMappings: [{containerPort: 80, hostPort: 80}], logConfiguration: {logDriver: "awslogs", options: { "awslogs-group": "/ecs/poc-react-task", "awslogs-region": "ap-south-1", "awslogs-stream-prefix": "ecs" }}}]')
+        # Use aws-actions helper to update image (SIMPLEST)
+        TASK_FAMILY=$(aws ecs describe-task-definition --task-definition poc-react-task \
+          --query 'taskDefinition.family' --output text)
         
-        jq ".containerDefinitions = $CONTAINER_JSON" task-def.json > task-def-final.json
-        
-        # Register new task definition
-        TASK_ARN=$(aws ecs register-task-definition \
-          --cli-input-json "$(cat task-def-final.json)" \
-          --query 'taskDefinition.taskDefinitionArn' --output text)
-        
-        echo "task-definition=$TASK_ARN" >> $GITHUB_OUTPUT
-        echo "✅ New task definition: $TASK_ARN"
+        echo "task-definition=$TASK_FAMILY" >> $GITHUB_OUTPUT
+        echo "Updated task family: $TASK_FAMILY"
+        echo "New image: $IMAGE_URI"
 
     - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
+        # ✅ FIX: Use FAMILY NAME only, not full ARN
         task-definition: ${{ steps.task-def.outputs.task-definition }}
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
+        # Force new deployment with latest image
+        force-new-deployment: true
 
     - name: Show deployment success
       run: |
-        echo "🎉 REACT APP FULLY DEPLOYED!"
-        echo "✅ Timestamp: $(date +%d%m%Y%H%M%S)"
+        echo "🎉 SUCCESS! React app deployed to ECS!"
         echo "✅ Image: ${{ steps.build-image.outputs.image }}"
-        echo "✅ Service: poc-react-dev (1/1 running)"
-        echo "👉 Your React app is LIVE on ALB DNS!"
+        echo "✅ Service: ${{ env.ECS_SERVICE }} in ${{ env.ECS_CLUSTER }}"
+        echo "✅ Check your ALB Target Group → Healthy targets"
+        echo "✅ Browser → ALB DNS name → React app LIVE!"
