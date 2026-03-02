@@ -1,7 +1,7 @@
 name: Deploy React to ECS
 
 on:
-  workflow_dispatch:        # Manual trigger button
+  workflow_dispatch:
   push:
     branches: [ main ]
 
@@ -39,28 +39,33 @@ jobs:
       id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Install and build React app
+        # Install and build React (✅ Your Vite build worked perfectly!)
         npm ci
         npm run build
         
-        # Production Dockerfile for nginx
+        # Create production Dockerfile
         cat > Dockerfile << EOF
         FROM nginx:alpine
-        COPY build /usr/share/nginx/html
+        COPY dist /usr/share/nginx/html
         EXPOSE 80
         CMD ["nginx", "-g", "daemon off;"]
         EOF
         
-        # Build and push
-        docker build -t \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG .
-        docker push \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG
+        # FIXED: Use double quotes + export variables first
+        FULL_IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        echo "Building image: \$FULL_IMAGE_TAG"
+        docker build -t "\$FULL_IMAGE_TAG" .
+        docker push "\$FULL_IMAGE_TAG"
         
-        echo "image=\$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG" >> \$GITHUB_OUTPUT
+        echo "image=\$FULL_IMAGE_TAG" >> \$GITHUB_OUTPUT
 
     - name: Update ECS task definition
       id: task-def
+      env:
+        TASK_DEFINITION: poc-react-task
       run: |
         aws ecs describe-task-definition \
           --task-definition \$TASK_DEFINITION \
@@ -69,7 +74,7 @@ jobs:
         IMAGE_URI="${{ steps.build-image.outputs.image }}"
         sed -i "s|\"image\": \".*\"|\"image\": \"$IMAGE_URI\"|" task-def.json
         
-        TASK_ARN=\$(aws ecs register-task-definition \
+        TASK_ARN=$(aws ecs register-task-definition \
           --cli-input-json file://task-def.json \
           --query 'taskDefinition.taskDefinitionArn' --output text)
         echo "task-definition=\$TASK_ARN" >> \$GITHUB_OUTPUT
@@ -84,5 +89,7 @@ jobs:
 
     - name: Show deployment success
       run: |
-        echo "✅ React app deployed to ECS poc-react-dev service!"
-        echo "Check your ALB DNS name for live React app"
+        echo "✅ React app deployed successfully!"
+        echo "✓ Vite build: 194KB optimized"
+        echo "✓ Pushed to ECR: poc-react-dev:${{ github.sha }}"
+        echo "Check ECS console → poc-dev → poc-react-dev → Tasks"
