@@ -29,7 +29,6 @@ jobs:
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
-        role-session-name: GitHubActions-React-Deploy
 
     - name: Login to Amazon ECR
       id: login-ecr
@@ -42,11 +41,9 @@ jobs:
         ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Install and build React (✅ Your Vite build worked perfectly!)
         npm ci
         npm run build
         
-        # Create production Dockerfile
         cat > Dockerfile << EOF
         FROM nginx:alpine
         COPY dist /usr/share/nginx/html
@@ -54,21 +51,19 @@ jobs:
         CMD ["nginx", "-g", "daemon off;"]
         EOF
         
-        # FIXED: Use double quotes + export variables first
-        FULL_IMAGE_TAG="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
-        echo "Building image: \$FULL_IMAGE_TAG"
-        docker build -t "\$FULL_IMAGE_TAG" .
-        docker push "\$FULL_IMAGE_TAG"
+        FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        echo "Building image: $FULL_IMAGE"
         
-        echo "image=\$FULL_IMAGE_TAG" >> \$GITHUB_OUTPUT
+        docker build --no-cache -t "$FULL_IMAGE" .
+        docker push "$FULL_IMAGE"
+        
+        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
 
     - name: Update ECS task definition
       id: task-def
-      env:
-        TASK_DEFINITION: poc-react-task
       run: |
         aws ecs describe-task-definition \
-          --task-definition \$TASK_DEFINITION \
+          --task-definition poc-react-task \
           --query taskDefinition > task-def.json
         
         IMAGE_URI="${{ steps.build-image.outputs.image }}"
@@ -77,7 +72,7 @@ jobs:
         TASK_ARN=$(aws ecs register-task-definition \
           --cli-input-json file://task-def.json \
           --query 'taskDefinition.taskDefinitionArn' --output text)
-        echo "task-definition=\$TASK_ARN" >> \$GITHUB_OUTPUT
+        echo "task-definition=$TASK_ARN" >> $GITHUB_OUTPUT
 
     - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
@@ -86,10 +81,3 @@ jobs:
         service: ${{ env.ECS_SERVICE }}
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
-
-    - name: Show deployment success
-      run: |
-        echo "✅ React app deployed successfully!"
-        echo "✓ Vite build: 194KB optimized"
-        echo "✓ Pushed to ECR: poc-react-dev:${{ github.sha }}"
-        echo "Check ECS console → poc-dev → poc-react-dev → Tasks"
