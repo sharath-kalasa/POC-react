@@ -6,51 +6,46 @@ on:
     branches: [ main ]
 
 permissions:
-  id-token: write          # OIDC authentication
+  id-token: write
   contents: read
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
-    # Use your GitHub secrets directly
     env:
-      AWS_REGION: ${{ secrets.aws_region }}           # ap-south-1
-      ECR_REPOSITORY: ${{ secrets.ecr_repository }}   # poc-react-dev
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
       ECS_CLUSTER: poc-dev
       ECS_SERVICE: poc-react-dev
       TASK_DEFINITION: poc-react-task
       
     steps:
-    # 1. Checkout your React code
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # 2. Configure AWS credentials using your GitHub role
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: ${{ secrets.aws_role_arn }}    # Your GitHub Actions IAM role
+        role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
         aws-region: ${{ env.AWS_REGION }}
         role-session-name: GitHubActions-React-Deploy
 
-    # 3. Login to ECR
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    # 4. Build React app + Docker + Push to ECR
     - name: Build React and push to ECR
       id: build-image
       env:
         ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
         IMAGE_TAG: ${{ github.sha }}
       run: |
-        # Install dependencies and build React
+        # Install and build React app
         npm ci
         npm run build
         
-        # Create production Dockerfile (nginx serves React build)
+        # Production Dockerfile for nginx
         cat > Dockerfile << EOF
         FROM nginx:alpine
         COPY build /usr/share/nginx/html
@@ -58,33 +53,27 @@ jobs:
         CMD ["nginx", "-g", "daemon off;"]
         EOF
         
-        # Build and push Docker image
+        # Build and push
         docker build -t \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG .
         docker push \$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG
         
         echo "image=\$ECR_REGISTRY/\$ECR_REPOSITORY:\$IMAGE_TAG" >> \$GITHUB_OUTPUT
 
-    # 5. Download current task definition + update image
     - name: Update ECS task definition
       id: task-def
       run: |
-        # Download existing task definition
         aws ecs describe-task-definition \
           --task-definition \$TASK_DEFINITION \
           --query taskDefinition > task-def.json
         
-        # Update container image to new ECR image
-        IMAGE_URI="\$(echo '${{ steps.build-image.outputs.image }}' | sed 's/\//\\\//g')"
+        IMAGE_URI="${{ steps.build-image.outputs.image }}"
         sed -i "s|\"image\": \".*\"|\"image\": \"$IMAGE_URI\"|" task-def.json
         
-        # Register new task definition revision
         TASK_ARN=\$(aws ecs register-task-definition \
           --cli-input-json file://task-def.json \
           --query 'taskDefinition.taskDefinitionArn' --output text)
-        
         echo "task-definition=\$TASK_ARN" >> \$GITHUB_OUTPUT
 
-    # 6. Deploy new task definition to ECS service
     - name: Deploy to Amazon ECS service
       uses: aws-actions/amazon-ecs-deploy-task-definition@v2
       with:
@@ -93,12 +82,7 @@ jobs:
         cluster: ${{ env.ECS_CLUSTER }}
         wait-for-service-stability: true
 
-    # 7. Show success URL (your ALB DNS)
-    - name: Show deployment URL
+    - name: Show deployment success
       run: |
-        echo "✅ React app deployed successfully!"
-        echo "Check your ALB DNS name for the live app"
-        aws elbv2 describe-load-balancers \
-          --names poc-react-alb \
-          --query 'LoadBalancers[0].DNSName' \
-          --output text || echo "Find ALB DNS in ECS console"
+        echo "✅ React app deployed to ECS poc-react-dev service!"
+        echo "Check your ALB DNS name for live React app"
