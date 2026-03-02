@@ -13,13 +13,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     
-    env:
-      AWS_REGION: ${{ secrets.AWS_REGION }}
-      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
-      ECS_CLUSTER: poc-dev
-      ECS_SERVICE: poc-react-dev
-      TASK_DEFINITION: poc-react-task
-      
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -28,25 +21,24 @@ jobs:
       uses: aws-actions/configure-aws-credentials@v4
       with:
         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-        aws-region: ${{ env.AWS_REGION }}
+        aws-region: ${{ secrets.AWS_REGION }}
 
     - name: Login to Amazon ECR
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build React and push to ECR
-      id: build-image
+    - name: Build & Push React App
       run: |
+        # Timestamp tag (ddmmyyyyhhmmss)
         IMAGE_TAG=$(date +%d%m%Y%H%M%S)
         ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-        ECR_REPOSITORY="${{ secrets.ECR_REPOSITORY }}"
-        FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+        ECR_REPO="${{ secrets.ECR_REPOSITORY }}"
+        FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
         
-        echo "Timestamp: $IMAGE_TAG"
         echo "Building: $FULL_IMAGE"
         
-        npm ci
-        npm run build
+        # Build React + Docker
+        npm ci && npm run build
         
         cat > Dockerfile << EOF
         FROM nginx:alpine
@@ -57,38 +49,39 @@ jobs:
         
         docker build --no-cache -t "$FULL_IMAGE" .
         docker push "$FULL_IMAGE"
-        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
-
-    - name: Update ECS task definition
-      id: task-def
-      run: |
-        # Download current task def and update image only
-        aws ecs describe-task-definition --task-definition poc-react-task --query taskDefinition > full-task.json
         
-        IMAGE_URI="${{ steps.build-image.outputs.image }}"
-        # Use aws-actions helper to update image (SIMPLEST)
-        TASK_FAMILY=$(aws ecs describe-task-definition --task-definition poc-react-task \
-          --query 'taskDefinition.family' --output text)
-        
-        echo "task-definition=$TASK_FAMILY" >> $GITHUB_OUTPUT
-        echo "Updated task family: $TASK_FAMILY"
-        echo "New image: $IMAGE_URI"
+        echo "FULL_IMAGE=$FULL_IMAGE" >> $GITHUB_ENV
 
-    - name: Deploy to Amazon ECS service
-      uses: aws-actions/amazon-ecs-deploy-task-definition@v2
-      with:
-        # ✅ FIX: Use FAMILY NAME only, not full ARN
-        task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: ${{ env.ECS_SERVICE }}
-        cluster: ${{ env.ECS_CLUSTER }}
-        wait-for-service-stability: true
-        # Force new deployment with latest image
-        force-new-deployment: true
-
-    - name: Show deployment success
+    - name: Deploy to ECS (SIMPLEST METHOD)
       run: |
-        echo "🎉 SUCCESS! React app deployed to ECS!"
-        echo "✅ Image: ${{ steps.build-image.outputs.image }}"
-        echo "✅ Service: ${{ env.ECS_SERVICE }} in ${{ env.ECS_CLUSTER }}"
-        echo "✅ Check your ALB Target Group → Healthy targets"
-        echo "✅ Browser → ALB DNS name → React app LIVE!"
+        aws ecs update-service \
+          --cluster poc-dev \
+          --service poc-react-dev \
+          --force-new-deployment \
+          --region ${{ secrets.AWS_REGION }}
+        
+        echo "✅ ECS Service redeployed - pulling new image!"
+        echo "✅ New image: $FULL_IMAGE"
+        
+        # Wait for deployment
+        for i in {1..20}; do
+          STATUS=$(aws ecs describe-services \
+            --cluster poc-dev \
+            --services poc-react-dev \
+            --query 'services[0].deployments[0].status' \
+            --output text --region ${{ secrets.AWS_REGION }})
+          
+          echo "Deployment status: $STATUS ($i/20)"
+          if [ "$STATUS" = "ACTIVE" ]; then
+            echo "✅ Deployment ACTIVE!"
+            break
+          fi
+          sleep 30
+        done
+
+    - name: Final Status
+      run: |
+        echo "🎉 REACT APP LIVE!"
+        echo "Image: $FULL_IMAGE"
+        echo "Service: poc-react-dev in poc-dev cluster"
+        echo "Check ALB DNS → React app ready! 🚀"
