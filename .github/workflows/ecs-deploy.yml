@@ -1,4 +1,4 @@
-name: Deploy React to ECS (JSON Method)
+name: Deploy React to ECS
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -27,40 +27,34 @@ jobs:
       id: login-ecr
       uses: aws-actions/amazon-ecr-login@v2
 
-    - name: Build React and push to ECR
+    - name: Build Docker image and push to ECR
       id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
       run: |
         IMAGE_TAG=$(date +%d%m%Y%H%M%S)
-        ECR_REGISTRY="${{ steps.login-ecr.outputs.registry }}"
-        ECR_REPO="${{ secrets.ECR_REPOSITORY }}"
-        FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
-        
-        echo "Building: $FULL_IMAGE"
-        npm ci && npm run build
-        
-        cat > Dockerfile << EOF
-        FROM nginx:alpine
-        COPY dist /usr/share/nginx/html
-        EXPOSE 80
-        CMD ["nginx", "-g", "daemon off;"]
-        EOF
-        
+        FULL_IMAGE="${ECR_REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+
+        echo "Building image: $FULL_IMAGE"
         docker build --no-cache -t "$FULL_IMAGE" .
         docker push "$FULL_IMAGE"
-        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
 
-    - name: Fill task definition (REPLACE dev-ui image)
+        echo "image=$FULL_IMAGE" >> $GITHUB_OUTPUT
+        echo "Successfully pushed: $FULL_IMAGE"
+
+    - name: Update ECS task definition with new image
       id: task-def
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
-        task-definition: poc-react-task.json          # ✅ Your JSON file
-        container-name: dev-ui                        # ✅ Your container name
+        task-definition: poc-react-task.json
+        container-name: dev-ui
         image: ${{ steps.build-image.outputs.image }}
 
-    - name: Deploy to ECS service
+    - name: Deploy updated task definition to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
-        task-definition: ${{ steps.task-def.outputs.task-definition }}  # ✅ Rendered JSON
+        task-definition: ${{ steps.task-def.outputs.task-definition }}
         service: poc-react-dev
         cluster: poc-dev
         wait-for-service-stability: true
