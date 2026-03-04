@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react'
 import './App.css'
 
+// ✅ Use environment variable instead of hardcoded localhost
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
+
 function App() {
   const [forecasts, setForecasts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Fetch weather forecast on component mount
   useEffect(() => {
     const fetchForecasts = async () => {
       try {
         setLoading(true)
-        const response = await fetch('http://localhost:8081/weatherforecast')
+        // ✅ Now calls /service/weatherforecast through the ALB in production
+        const response = await fetch(`${API_BASE_URL}/service/weatherforecast`)
         if (!response.ok) throw new Error('Failed to fetch forecasts')
         const data = await response.json()
         setForecasts(data)
@@ -40,7 +43,6 @@ function App() {
         </button>
       </div>
 
-      {/* Weather Forecast Scrollable Window */}
       <div className="weather-container">
         <h3>🌤️ Weather Forecast</h3>
         {loading && <p>Loading forecasts...</p>}
@@ -66,4 +68,3 @@ function App() {
 }
 
 export default App
- 
