@@ -1,17 +1,21 @@
 # Build stage
 FROM node:18-alpine AS build
 WORKDIR /app
+
 COPY package*.json ./
 RUN npm install
+
 COPY . .
 RUN npm run build
 
-# Serve stage
-FROM nginx:alpine
-COPY --from=build /app/dist /usr/share/nginx/html
+# Runtime stage
+FROM node:18-alpine
+WORKDIR /app
 
-# ✅ Custom nginx config for React routing
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN npm install -g serve
+
+COPY --from=build /app/dist ./dist
 
 EXPOSE 3000
-CMD ["nginx", "-g", "daemon off;"]
+
+CMD ["serve", "-s", "dist", "-l", "3000"]
