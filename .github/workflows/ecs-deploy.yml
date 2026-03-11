@@ -48,13 +48,13 @@ jobs:
       uses: aws-actions/amazon-ecs-render-task-definition@v1
       with:
         task-definition: poc-react-task.json
-        container-name: dev-ui
+        container-name: ui
         image: ${{ steps.build-image.outputs.image }}
 
     - name: Deploy updated task definition to ECS
       uses: aws-actions/amazon-ecs-deploy-task-definition@v1
       with:
         task-definition: ${{ steps.task-def.outputs.task-definition }}
-        service: poc-react-dev
-        cluster: poc-dev
+        service: ui-task-service
+        cluster: dev-poc
         wait-for-service-stability: true
